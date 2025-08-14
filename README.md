@@ -33,13 +33,29 @@ If your API differs, update `lib/api.ts` and I can adjust the mapping.
 - `npm run build:staging` -> outputs to `dist/`
 - `npm run build:prod` -> outputs to `dist/`
 
-## Deploy (Netlify example)
+## Deploy (Netlify – Native Build Active)
 
-- `netlify.toml` is configured for SPA routing.
-- GitHub Actions workflow `.github/workflows/deploy-netlify.yml` builds and deploys on push to `main`.
-- Add repository secrets:
-  - `NETLIFY_AUTH_TOKEN`
-  - `NETLIFY_SITE_ID`
+We use Netlify's own build pipeline (GitHub Actions deploy workflow removed). The file `netlify.toml` controls the build.
+
+Build settings:
+- Command: `npm run build:prod && npm run perf:budget`
+- Publish: `dist`
+
+Steps to deploy:
+1. Connect the GitHub repo to Netlify (Site settings → Build & deploy → Continuous Deployment).
+2. Set environment variables (Netlify UI → Site configuration → Environment variables):
+  - `VITE_API_URL` (if you have a backend)
+  - `VITE_APP_ENV=production`
+3. Push to `main` (or open a PR for a Deploy Preview). Netlify runs tests indirectly via the build; performance budget will fail the build if JS size exceeds limits.
+4. After deploy, verify:
+  - App loads and fetches backend data (if configured)
+  - Language toggle works
+  - Service Worker registered (DevTools → Application → Service Workers)
+  - Offline reload shows cached shell
+
+Rollbacks: Netlify → Deploys → pick prior successful deploy → Rollback.
+
+If you later prefer GitHub Actions to deploy, restore a workflow and disable Netlify's auto-builds to avoid double deployments.
 
 ## Notes
 
@@ -88,9 +104,9 @@ Remaining nice-to-haves:
 - Debounced batch for `recordUserAction` (still per-event fire-and-forget).
 - Remove legacy placeholder test file if filesystem duplication no longer an issue.
 
-## Step-by-step: Backend + Deploy
+## Backend Integration & Local → Production Flow
 
-Use these steps to wire the backend, test locally, and deploy to Netlify using the existing GitHub Actions workflow.
+Use these steps to wire backend, test locally, then rely on Netlify native build.
 
 ### 1) Confirm backend URL for each environment
 
@@ -153,40 +169,7 @@ Optional preview:
 npx serve .\dist
 ```
 
-### 5) Deploy via GitHub → Netlify (current workflow)
-
-This repo deploys by building on GitHub Actions and uploading the `dist/` folder to Netlify.
-
-1. Create a Netlify site (no need to enable Netlify builds for this path).
-2. In GitHub repo Settings → Secrets and variables → Actions, add:
-   - `NETLIFY_AUTH_TOKEN` = your Netlify personal access token
-   - `NETLIFY_SITE_ID` = your Netlify site ID
-3. Ensure `.env.production` contains your real `VITE_API_URL`.
-4. Push to `main` and watch the Actions tab for the deploy job.
-
-Netlify environment variables are NOT used in this path because the build happens in GitHub. To keep your API URL out of the repo, you can inject it via the workflow instead (see below).
-
-Inject via workflow (optional): edit `.github/workflows/deploy-netlify.yml` and add an `env:` block to the build step:
-
-```yaml
-      - run: npm run build:prod
-        env:
-          VITE_API_URL: https://api.your-backend.com
-          VITE_APP_ENV: production
-```
-
-### 6) Alternative: Build on Netlify
-
-If you prefer Netlify to run the build (so Netlify env vars are used):
-
-- Connect the GitHub repo in Netlify and enable builds.
-- Set build command to `npm run build:prod` and publish dir to `dist` (already reflected in `netlify.toml`).
-- Set site environment variables in Netlify UI:
-  - `VITE_API_URL = https://api.your-backend.com`
-  - `VITE_APP_ENV = production`
-- Either remove or disable the GitHub Actions deploy step, or switch it to a “preview” flow.
-
-### 7) Verify live site
+### 5) Verify live site
 
 After deployment, open your Netlify site URL and test:
 - Feed shows backend posts/questions
@@ -195,7 +178,7 @@ After deployment, open your Netlify site URL and test:
 
 Check the browser console/Network tab for any failing requests.
 
-### 8) Fix common CORS/env issues
+### 6) Fix common CORS/env issues
 
 - CORS: Add your site origin (e.g., `https://<your-site>.netlify.app` and your custom domain) to the backend’s allowed origins.
   - Node/Express example: use `cors` with `origin: ["https://<your-site>.netlify.app"]`.

@@ -1,6 +1,9 @@
 [build]
-  command = "npm run build:prod"
+  command = "npm run build:prod && npm run perf:budget"
   publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
 
 [[redirects]]
   from = "/*"
