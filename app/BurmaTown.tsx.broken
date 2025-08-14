@@ -1,0 +1,707 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { MessageSquare, Building2, Users, LayoutGrid, LogIn, LogOut, Search } from "lucide-react";
+
+// Lib
+import { colors, uid, initials } from "@/lib/helpers";
+import { loadUsers, saveUsers, loadSession, clearSession, getUserActions, updateUserActions } from "@/lib/storage";
+
+// Components
+import { TypeBadge } from "@/components/Badges";
+import CreatePost from "@/components/CreatePost";
+import BusinessProfileForm from "@/components/BusinessProfile";
+import BusinessCard, { Business } from "@/components/BusinessCard";
+import { QAForm, QAItem, QuestionModel } from "@/components/QA";
+import { PostCard, PostModel } from "@/components/PostCard";
+import AuthModal from "@/components/AuthModal";
+
+// --- Tiny router (history API) ---
+const pathToTab = (path: string): "feed" | "qa" | "biz" | "profile" => {
+  const seg = (path || "/").replace(/\/+$/, "").split("/")[1] || "feed";
+  if (seg === "qa" || seg === "biz" || seg === "profile") return seg;
+  return "feed";
+};
+const tabToPath = (tab: string) => `/${tab}`;
+
+export default function BurmaTown() {
+  const [active, setActive] = useState<"feed" | "qa" | "biz" | "profile">(pathToTab(window.location.pathname));
+  const [sessionUser, setSessionUser] = useState<any>(null);
+  const actionsAppliedRef = useRef(false);
+
+  const [profile, setProfile] = useState<any>({
+    type: "general",
+    name: "Guest",
+    category: "",
+    website: "",
+    bio: "",
+    avatar: "",
+  });
+
+  // Router listeners
+  useEffect(() => {
+    const onPop = () => setActive(pathToTab(window.location.pathname));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  useEffect(() => {
+    const nextPath = tabToPath(active);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, "", nextPath);
+    }
+  }, [active]);
+
+  // Hydrate session
+  useEffect(() => {
+    const sess = loadSession();
+    if (sess?.email) {
+      const users = loadUsers();
+      const user = users.find((u) => u.email === sess.email);
+      if (user) setSessionUser(user);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (sessionUser) {
+      setProfile({
+        type: sessionUser.type,
+        name: sessionUser.name,
+        category: sessionUser.category || "",
+        website: sessionUser.website || "",
+        bio: sessionUser.bio || "",
+        avatar: sessionUser.avatar || "",
+      });
+    } else {
+      setProfile({ type: "general", name: "Guest", category: "", website: "", bio: "", avatar: "" });
+    }
+  }, [sessionUser]);
+
+  const signOut = () => {
+    clearSession();
+    setSessionUser(null);
+  };
+
+  // Seed data
+  const [posts, setPosts] = useState<PostModel[]>([
+    {
+      id: uid(),
+      title: "Launching our Summer Jasmine Blend",
+      body: "Delicate aroma, fresh harvest. Pre-orders open now!",
+      mediaUrl:
+        "https://images.unsplash.com/photo-1517686469429-8bdb88b9f907?q=80&w=1200&auto=format&fit=crop",
+      price: "12.99",
+      author: "Golden Lotus Tea",
+      authorEmail: "golden@lotus.mm",
+      authorAvatar: "",
+      authorType: "business",
+      createdAt: Date.now() - 1000 * 60 * 60 * 3,
+      reactions: { like: 12, love: 4, star: 2 },
+      userReaction: null,
+      reports: 0,
+      comments: [
+        {
+          id: uid(),
+          author: "Myo Min",
+          authorEmail: "myo@student.mm",
+          authorAvatar: "",
+          authorType: "student",
+          text: "Is there a student discount?",
+          createdAt: Date.now() - 1000 * 60 * 60 * 2,
+          reactions: { like: 0, love: 0 },
+          userReaction: null,
+          reports: 0,
+          replies: [
+            {
+              id: uid(),
+              author: "Golden Lotus Tea",
+              authorAvatar: "",
+              text: "Yes! 10% with student ID.",
+              createdAt: Date.now() - 1000 * 60 * 55,
+            },
+          ],
+        },
+      ],
+    },
+  ]);
+
+  const [questions, setQuestions] = useState<QuestionModel[]>([
+    {
+      id: uid(),
+      title: "Best places to source packaging in Yangon?",
+      details: "Looking for eco-friendly suppliers.",
+      author: "Aye Aye",
+      authorEmail: "aye@user.mm",
+      authorAvatar: "",
+      createdAt: Date.now() - 1000 * 60 * 90,
+      useful: 1,
+      usefulByUser: false,
+      reports: 0,
+      answers: [
+        {
+          id: uid(),
+          author: "Soe Naing (Green Pack)",
+          authorEmail: "soenaing@biz.mm",
+          authorAvatar: "",
+          text: "Try Thaketa Industrial Zone – several vendors with recycled options.",
+          reports: 0,
+        },
+      ],
+    },
+  ]);
+
+  // Apply persisted actions once per session load
+  useEffect(() => {
+    if (!sessionUser || actionsAppliedRef.current) return;
+    const actions = getUserActions(sessionUser.email);
+    // Posts
+    setPosts((prev) =>
+      prev.map((p) => {
+        const r = actions.postReactions[p.id];
+        if (r && p.userReaction == null) {
+          // Ensure reactions always has like, love, star
+          const reactions = {
+            like: p.reactions.like,
+            love: p.reactions.love,
+            star: p.reactions.star,
+          };
+          reactions[r] = (reactions[r] || 0) + 1;
+          return { ...p, userReaction: r as any, reactions };
+        }
+        return p;
+      })
+    );
+    // Questions useful
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (actions.questionUseful[q.id] && !q.usefulByUser) {
+          return { ...q, usefulByUser: true, useful: (q.useful || 0) + 1 };
+        }
+        return q;
+      })
+    );
+    // Comments reactions cannot be easily incremented without IDs mapping; we stored by commentId, so do it:
+    setPosts((prev) =>
+      prev.map((p) => ({
+        ...p,
+        comments: p.comments.map((c: any) => {
+          const cr = actions.commentReactions[c.id];
+          if (cr && c.userReaction == null) {
+            const reactions = { ...c.reactions } as Record<string, number>;
+            reactions[cr] = (reactions[cr] || 0) + 1;
+            return { ...c, userReaction: cr as any, reactions };
+          }
+          return c;
+        }),
+      }))
+    );
+    actionsAppliedRef.current = true;
+  }, [sessionUser]);
+
+  // Derive businesses from users + posts
+  const businessesFromUsers = useMemo(
+    () => loadUsers().filter((u: any) => u.type === "business"),
+    [sessionUser]
+  );
+
+  const businesses: Business[] = useMemo(() => {
+    const b: Business[] = [];
+    if (profile?.type === "business") b.push({ ...profile, name: profile.name });
+    posts.forEach((p) => {
+      if (p.authorType === "business") {
+        b.push({
+          name: p.author,
+          category: (p as any).category || profile.category,
+          website: profile.website,
+          bio: profile.bio,
+          avatar: p.authorAvatar,
+          email: p.authorEmail,
+        });
+      }
+    });
+    businessesFromUsers.forEach((u: any) =>
+      b.push({ name: u.name, category: u.category, website: u.website, bio: u.bio, avatar: u.avatar, email: u.email })
+    );
+    const map = new Map<string, Business>();
+    b.forEach((x) => map.set(x.name, x));
+    return Array.from(map.values());
+  }, [posts, profile, businessesFromUsers]);
+
+  // Handlers with persistence
+  const createPost = ({ title, body, mediaUrl, price }: { title: string; body: string; mediaUrl?: string; price?: string }) => {
+    const post: PostModel = {
+      id: uid(),
+      title,
+      body,
+      mediaUrl,
+      price,
+      author: profile.name || "Anonymous",
+      authorEmail: sessionUser?.email || "",
+      authorAvatar: profile.avatar || "",
+      authorType: profile.type,
+      createdAt: Date.now(),
+      reactions: { like: 0, love: 0, star: 0 },
+      userReaction: null,
+      reports: 0,
+      comments: [],
+    };
+    setPosts((p) => [post, ...p]);
+  };
+
+  const reactToPost = (postId: string, kind: "like" | "love" | "star") => {
+    if (!sessionUser) return;
+    const email = sessionUser.email;
+    updateUserActions(email, (prev) => {
+      const current = prev.postReactions[postId] || null;
+      const next = { ...prev };
+      if (current === kind) {
+        delete next.postReactions[postId];
+      } else {
+        next.postReactions[postId] = kind;
+      }
+      return next;
+    });
+    setPosts((prev) =>
+      prev.map((p) => {
+        if (p.id !== postId) return p;
+        const current = p.userReaction;
+        // Ensure reactions always has like, love, star
+        const reactions = {
+          like: p.reactions.like,
+          love: p.reactions.love,
+          star: p.reactions.star,
+        };
+        if (current === kind) {
+          reactions[kind] = Math.max(0, reactions[kind] - 1);
+          return { ...p, reactions, userReaction: null };
+        }
+        if (current) reactions[current] = Math.max(0, reactions[current] - 1);
+        reactions[kind] = reactions[kind] + 1;
+        return { ...p, reactions, userReaction: kind };
+      })
+    );
+  };
+
+  // Removed unused addComment function to fix compile error.
+
+  // Removed unused reactToComment function to fix compile error.
+
+
+  const askQuestion = ({ title, details }: { title: string; details?: string }) => {
+    setQuestions((qs) => [
+      {
+        id: uid(),
+        title,
+        details,
+        author: profile.name || "User",
+        authorEmail: sessionUser?.email || "",
+        authorAvatar: profile.avatar || "",
+        createdAt: Date.now(),
+        useful: 0,
+        usefulByUser: false,
+        reports: 0,
+        answers: [],
+      },
+      ...qs,
+    ]);
+  };
+
+        ]);
+    };
+      };
+
+  const answerQuestion = (qid: string, text: string) => {
+    setQuestions((qs) =>
+      qs.map((q) => (q.id === qid ? { ...q, answers: [...q.answers, { id: uid(), author: profile.name || "User", authorEmail: sessionUser?.email || "", authorAvatar: profile.avatar || "", text, reports: 0 }] } : q))
+    );
+  };
+
+  const toggleUseful = (qid: string) => {
+    if (!sessionUser) return;
+    const email = sessionUser.email;
+    updateUserActions(email, (prev) => {
+      const next = { ...prev };
+      if (next.questionUseful[qid]) delete next.questionUseful[qid];
+      else next.questionUseful[qid] = true;
+      return next;
+    });
+    setQuestions((qs) =>
+      qs.map((q) => {
+        if (q.id !== qid) return q;
+        const next = !q.usefulByUser;
+        return { ...q, usefulByUser: next, useful: Math.max(0, (q.useful || 0) + (next ? 1 : -1)) };
+      })
+    );
+  };
+
+  // Reports (one per user per item)
+  const reportPost = (postId: string) => {
+    if (!sessionUser) return;
+    const email = sessionUser.email;
+    let already = false;
+    updateUserActions(email, (prev) => {
+      const next = { ...prev, reports: { ...prev.reports, posts: { ...prev.reports.posts } } };
+      if (next.reports.posts[postId]) {
+        already = true;
+        return next;
+      }
+      next.reports.posts[postId] = true;
+      return next;
+    });
+    if (!already) setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, reports: (p.reports || 0) + 1 } : p)));
+  };
+
+
+  const reportQuestion = (qid: string, answerId?: string) => {
+    if (!sessionUser) return;
+    const email = sessionUser.email;
+    let already = false;
+    updateUserActions(email, (prev) => {
+      const next = { ...prev, reports: { ...prev.reports } } as any;
+      if (!answerId) {
+        next.reports.questions = { ...next.reports.questions };
+        if (next.reports.questions[qid]) {
+          already = true;
+          return next;
+        }
+        next.reports.questions[qid] = true;
+        return next;
+      }
+      next.reports.answers = { ...next.reports.answers };
+      if (next.reports.answers[answerId]) {
+        already = true;
+        return next;
+      }
+      next.reports.answers[answerId] = true;
+      return next;
+    });
+    if (!already)
+      setQuestions((qs) =>
+        qs.map((q) => {
+          if (q.id !== qid) return q;
+          if (!answerId) return { ...q, reports: (q.reports || 0) + 1 };
+          return { ...q, answers: q.answers.map((a: any) => (a.id === answerId ? { ...a, reports: (a.reports || 0) + 1 } : a)) };
+        })
+      );
+  };
+
+  const onProfileSave = (p: any) => {
+    setProfile(p);
+    if (sessionUser) {
+      const users = loadUsers();
+      const idx = users.findIndex((u: any) => u.email === sessionUser.email);
+      if (idx !== -1) {
+        users[idx] = { ...users[idx], ...p, name: p.name };
+        saveUsers(users);
+        setSessionUser(users[idx]);
+      }
+    }
+  };
+
+  // Business search & modal
+  const [bizQuery, setBizQuery] = useState("");
+  const filteredBusinesses = useMemo(() => {
+    const q = bizQuery.toLowerCase();
+    return businesses.filter((b) => [b.name, b.category || ""].some((x) => x.toLowerCase().includes(q)));
+  }, [bizQuery, businesses]);
+
+  const [openBiz, setOpenBiz] = useState<Business | null>(null);
+  const bizPosts = useMemo(
+    () => posts.filter((p) => openBiz && (p.authorEmail ? p.authorEmail === openBiz.email : p.author === openBiz?.name)),
+    [openBiz, posts]
+  );
+
+  return (
+    <div className="min-h-screen" style={{ background: colors.white }}>
+      {/* Top Bar */}
+      <div className="sticky top-0 z-20 border-b backdrop-blur supports-[backdrop-filter]:bg-white/70" style={{ borderColor: colors.smoke }}>
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl flex items-center justify-center font-bold" style={{ background: colors.black, color: colors.gold }}>
+              BT
+            </div>
+            <div className="font-semibold tracking-wide" style={{ color: colors.black }}>
+              Burma Town
+            </div>
+          </div>
+          <div className="hidden md:flex items-center gap-2">
+            <Button variant="ghost" className={`gap-2 ${active === "feed" ? "font-semibold" : ""}`} onClick={() => setActive("feed")}>
+              <LayoutGrid className="h-4 w-4" /> Feed
+            </Button>
+            <Button variant="ghost" className={`gap-2 ${active === "qa" ? "font-semibold" : ""}`} onClick={() => setActive("qa")}>
+              <MessageSquare className="h-4 w-4" /> Q&A
+            </Button>
+            <Button variant="ghost" className={`gap-2 ${active === "biz" ? "font-semibold" : ""}`} onClick={() => setActive("biz")}>
+              <Building2 className="h-4 w-4" /> Businesses
+            </Button>
+            <Button variant="ghost" className={`gap-2 ${active === "profile" ? "font-semibold" : ""}`} onClick={() => setActive("profile")}>
+              <Users className="h-4 w-4" /> Profile
+            </Button>
+            {!sessionUser ? (
+              <AuthModal
+                onSignedIn={() => {
+                  const sess = loadSession();
+                  if (sess?.email) {
+                    const users = loadUsers();
+                    const user = users.find((u) => u.email === sess.email);
+                    if (user) setSessionUser(user);
+                  }
+                }}
+                trigger={() => (
+                  <Button variant="outline" className="ml-2" style={{ borderColor: colors.gold }}>
+                    <LogIn className="h-4 w-4 mr-1" /> Sign in
+                  </Button>
+                )}
+              />
+            ) : (
+              <div className="flex items-center gap-2">
+                <Avatar className="h-8 w-8 border" style={{ borderColor: colors.gold }}>
+                  {profile.avatar ? (
+                    <img src={profile.avatar} alt="avatar" className="h-8 w-8 rounded-full object-cover" />
+                  ) : (
+                    <AvatarFallback style={{ background: colors.black, color: colors.gold }}>
+                      {initials(sessionUser.name)}
+                    </AvatarFallback>
+                  )}
+                </Avatar>
+                <Button variant="outline" onClick={signOut} style={{ borderColor: colors.gold }}>
+                  <LogOut className="h-4 w-4 mr-1" /> Sign out
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Main */}
+      <div className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Left */}
+        <div className="lg:col-span-1 space-y-6 order-2 lg:order-1">
+          <BusinessProfileForm profile={profile} setProfile={onProfileSave} />
+          {!sessionUser && (
+            <Card className="border rounded-2xl">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Get started</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm space-y-2">
+                <p>Guests can browse everything. Sign in to post, react, and comment.</p>
+                <AuthModal
+                  onSignedIn={() => {
+                    const sess = loadSession();
+                    if (sess?.email) {
+                      const users = loadUsers();
+                      const user = users.find((u) => u.email === sess.email);
+                      if (user) setSessionUser(user);
+                    }
+                  }}
+                  trigger={() => (
+                    <Button className="w-full" style={{ background: colors.gold, color: colors.black }}>
+                      <LogIn className="h-4 w-4 mr-1" /> Sign up / Sign in
+                    </Button>
+                  )}
+                />
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Center */}
+        <div className="lg:col-span-2 space-y-6 order-1 lg:order-2">
+          {active === "feed" && (
+            <>
+              <CreatePost profile={profile} onCreate={createPost} sessionUser={sessionUser} />
+              <AnimatePresence>
+                {posts.map((post) => (
+                  <motion.div key={post.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+                    <PostCard
+                      post={post}
+                      sessionUser={sessionUser}
+                      onReact={reactToPost}
+                      onReport={() => reportPost(post.id)}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </>
+          )}
+
+          {active === "qa" && (
+            <>
+              <QAForm onAsk={askQuestion} sessionUser={sessionUser} />
+              <div className="space-y-4">
+                {questions.map((q) => (
+                  <QAItem key={q.id} q={q} sessionUser={sessionUser} onReply={answerQuestion} onUseful={toggleUseful} onReport={(qid, aid) => reportQuestion(qid, aid)} />
+                ))}
+              </div>
+            </>
+          )}
+
+          {active === "biz" && (
+            <div className="grid gap-4">
+              <div className="flex items-center gap-2">
+                <Search className="h-4 w-4" />
+                <Input value={bizQuery} onChange={(e) => setBizQuery(e.target.value)} placeholder="Search businesses by name or category" />
+              </div>
+              {filteredBusinesses.length === 0 && (
+                <Card className="border rounded-2xl">
+                  <CardContent className="py-10 text-center text-sm">No businesses match your search.</CardContent>
+                </Card>
+              )}
+              {filteredBusinesses.map((b) => (
+                <BusinessCard key={b.name} biz={b} onOpen={setOpenBiz} />
+              ))}
+            </div>
+          )}
+
+          {active === "profile" && (
+            <Card className="border rounded-2xl">
+              <CardHeader>
+                <CardTitle className="text-lg">Your Profile</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-12 w-12 border" style={{ borderColor: colors.gold }}>
+                    {profile.avatar ? (
+                      <img src={profile.avatar} alt="avatar" className="h-12 w-12 rounded-full object-cover" />
+                    ) : (
+                      <AvatarFallback style={{ background: colors.black, color: colors.gold }}>
+                        {initials(profile.name)}
+                      </AvatarFallback>
+                    )}
+                  </Avatar>
+                  <div>
+                    <div className="font-semibold text-lg flex items-center gap-2">
+                      {profile.name} <TypeBadge type={profile.type} />
+                    </div>
+                    <div className="text-xs opacity-70 capitalize">{profile.type} account</div>
+                  </div>
+                </div>
+                {profile.type === "business" && (
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="opacity-60">Category:</span> {profile.category || "—"}
+                    </div>
+                    <div>
+                      <span className="opacity-60">Website:</span>{" "}
+                      {profile.website ? (
+                        <a href={profile.website} className="underline" target="_blank" rel="noreferrer">
+                          {profile.website}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </div>
+                  </div>
+                )}
+                <p className="text-sm">{profile.bio || "No bio yet."}</p>
+
+                <Separator />
+                <div className="font-medium">My Posts</div>
+                <div className="space-y-3">
+                  {posts
+                    .filter((p) => p.authorEmail === sessionUser?.email)
+                    .map((p) => (
+                      <div key={p.id} className="text-sm p-3 rounded-xl" style={{ background: colors.offwhite }}>
+                        <div className="font-medium">{p.title}</div>
+                        <div className="text-xs opacity-70">{new Date(p.createdAt).toLocaleString()}</div>
+                      </div>
+                    ))}
+                  {sessionUser && posts.filter((p) => p.authorEmail === sessionUser?.email).length === 0 && (
+                    <div className="text-sm opacity-70">No posts yet.</div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Right */}
+        <div className="lg:col-span-1 space-y-6 order-3">
+          <Card className="border rounded-2xl overflow-hidden">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Guidelines</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm space-y-2">
+              <p>• Keep it friendly and constructive.</p>
+              <p>• Product posts: add clear photos/videos and pricing.</p>
+              <p>• Q&A: include details to get better answers.</p>
+            </CardContent>
+          </Card>
+          <Card className="border rounded-2xl">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Trending Q&A</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {questions.slice(0, 3).map((q) => (
+                <div key={q.id} className="p-3 rounded-xl" style={{ background: colors.offwhite }}>
+                  {q.title}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Business Profile Modal */}
+      {openBiz && (
+        <Dialog open={!!openBiz} onOpenChange={(o) => !o && setOpenBiz(null)}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{openBiz.name}</DialogTitle>
+            </DialogHeader>
+            <div className="flex items-center gap-3 mb-3">
+              <Avatar className="h-12 w-12 border" style={{ borderColor: colors.gold }}>
+                {openBiz.avatar ? (
+                  <img src={openBiz.avatar} alt="avatar" className="h-12 w-12 rounded-full object-cover" />
+                ) : (
+                  <AvatarFallback style={{ background: colors.black, color: colors.gold }}>
+                    {initials(openBiz.name)}
+                  </AvatarFallback>
+                )}
+              </Avatar>
+              <div className="text-sm">
+                <div className="flex items-center gap-2">
+                  <TypeBadge type="business" /> <span>{openBiz.category}</span>
+                </div>
+                {openBiz.website && (
+                  <a className="underline" href={openBiz.website} target="_blank" rel="noreferrer">
+                    {openBiz.website}
+                  </a>
+                )}
+              </div>
+            </div>
+            <p className="text-sm mb-4">{openBiz.bio || "No bio yet."}</p>
+            <Separator />
+            <div className="mt-4">
+              <div className="font-medium mb-2">Posts by {openBiz.name}</div>
+              <div className="grid gap-3">
+                {bizPosts.length === 0 && <div className="text-sm opacity-70">No posts from this business yet.</div>}
+                {bizPosts.map((p) => (
+                  <div key={p.id} className="text-sm p-3 rounded-xl" style={{ background: colors.offwhite }}>
+                    <div className="font-medium">{p.title}</div>
+                    <div className="text-xs opacity-70">{new Date(p.createdAt).toLocaleString()}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Footer */}
+      <div className="border-t py-8 mt-8" style={{ borderColor: colors.smoke }}>
+        <div className="max-w-6xl mx-auto px-4 text-xs opacity-70 flex items-center justify-between">
+          <div>© {new Date().getFullYear()} Burma Town — Minimalist community platform.</div>
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full" style={{ background: colors.gold }} />
+            <span>Gold · White · Black</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

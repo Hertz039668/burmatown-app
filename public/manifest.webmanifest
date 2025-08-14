@@ -1,0 +1,12 @@
+{
+  "name": "Burma Town",
+  "short_name": "BurmaTown",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#000000",
+  "description": "Community, businesses & Q&A platform for Burma Town.",
+  "icons": [
+    { "src": "/vite.svg", "sizes": "192x192", "type": "image/svg+xml" }
+  ]
+}

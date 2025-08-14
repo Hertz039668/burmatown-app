@@ -1,0 +1,83 @@
+name: Deploy to Netlify
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+concurrency:
+  group: netlify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install deps
+        run: npm ci
+      - name: Run tests
+        run: npm test
+      - name: Type check
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Build (prod mode)
+        run: npm run build:prod
+        env:
+          # (Optional) Pass through runtime build env vars; define these secrets in repo settings before uncommenting.
+          # VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_APP_ENV: production
+      - name: Smoke test
+        run: npm run smoke
+      - name: Performance budget
+        run: npm run perf:budget
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+  deploy:
+    needs: build-test
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Deploy to Netlify (prod or preview)
+        uses: nwtgck/actions-netlify@v2.1
+        with:
+          publish-dir: './dist'
+          production-branch: 'main'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          deploy-message: >-
+            ${{ github.event_name == 'pull_request' && 'Preview deploy for PR #' || 'Production deploy' }}${{ github.event.pull_request.number }} @ ${{ github.sha }}
+          enable-pull-request-comment: true
+          enable-commit-comment: false
+          alias: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'production' }}
+          # Retain deploy for diffing performance budgets (optional)
+          enable-commit-status: true
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+  # Optional: lightweight link check or smoke test stage (placeholder)
+  smoke-test:
+    needs: deploy
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit homepage
+        run: |
+          echo "Skipping smoke test (configure SITE_PRIMARY_DOMAIN secret and curl command if desired)"
